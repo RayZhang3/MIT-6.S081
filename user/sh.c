@@ -133,9 +133,9 @@ runcmd(struct cmd *cmd)
 int
 getcmd(char *buf, int nbuf)
 {
-  fprintf(2, "$ ");
-  memset(buf, 0, nbuf);
-  gets(buf, nbuf);
+  fprintf(2, "$ "); // Output an '$' to stderr
+  memset(buf, 0, nbuf); //initialize the buf (n)
+  gets(buf, nbuf); // get a line from stdin, max length nbuf.
   if(buf[0] == 0) // EOF
     return -1;
   return 0;
@@ -330,14 +330,14 @@ parsecmd(char *s)
   char *es;
   struct cmd *cmd;
 
-  es = s + strlen(s);
-  cmd = parseline(&s, es);
+  es = s + strlen(s); // es points to the end of s.
+  cmd = parseline(&s, es); //parsing the command of a line. Syntax error if any remained char exist.
   peek(&s, es, "");
   if(s != es){
     fprintf(2, "leftovers: %s\n", s);
     panic("syntax");
   }
-  nulterminate(cmd);
+  nulterminate(cmd); // add null to the end of string. So call, null-terminate
   return cmd;
 }
 
@@ -349,17 +349,17 @@ parseline(char **ps, char *es)
   cmd = parsepipe(ps, es);
   while(peek(ps, es, "&")){
     gettoken(ps, es, 0, 0);
-    cmd = backcmd(cmd);
+    cmd = backcmd(cmd); // back-end process
   }
   if(peek(ps, es, ";")){
     gettoken(ps, es, 0, 0);
-    cmd = listcmd(cmd, parseline(ps, es));
+    cmd = listcmd(cmd, parseline(ps, es)); // list the commands
   }
   return cmd;
 }
 
 struct cmd*
-parsepipe(char **ps, char *es)
+parsepipe(char **ps, char *es) // parse the sign of pipe.
 {
   struct cmd *cmd;
 

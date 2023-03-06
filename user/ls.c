@@ -55,7 +55,7 @@ ls(char *path)
     p = buf+strlen(buf);
     *p++ = '/';
     while(read(fd, &de, sizeof(de)) == sizeof(de)){
-      if(de.inum == 0)
+      if(de.inum == 0) //super block?
         continue;
       memmove(p, de.name, DIRSIZ);
       p[DIRSIZ] = 0;

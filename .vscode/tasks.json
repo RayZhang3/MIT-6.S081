@@ -1,0 +1,36 @@
+// tasks.json
+{
+    "version": "2.0.0",
+    "options": { //指定make qemu的执行位置
+        "cwd": "${workspaceFolder}"
+    },
+    "tasks": [
+        {
+            "label": "xv6build",
+            "type": "shell",
+            "isBackground": true,
+            "command": "make CPUS=1 qemu-gdb",
+            "problemMatcher": [
+                {
+                    "pattern": [
+                        {
+                            "regexp": ".",
+                            "file": 1,
+                            "location": 2,
+                            "message": 3
+                        }
+                    ],
+                    "background": {
+                        "beginsPattern": ".*Now run 'gdb' in another window.",
+                        "endsPattern": "."
+                    }
+                }
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+                }
+        }
+    ]
+}
+    

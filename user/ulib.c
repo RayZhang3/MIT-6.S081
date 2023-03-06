@@ -60,7 +60,7 @@ gets(char *buf, int max)
 
   for(i=0; i+1 < max; ){
     cc = read(0, &c, 1);
-    if(cc < 1)
+    if(cc < 1)  // return no char.
       break;
     buf[i++] = c;
     if(c == '\n' || c == '\r')
