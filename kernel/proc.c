@@ -21,6 +21,10 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+extern pagetable_t kernel_pagetable; //kernel_pagetable
+extern char etext[];  // kernel.ld sets this to end of kernel code.
+extern char trampoline[]; // trampoline.S
+
 // initialize the proc table at boot time.
 void
 procinit(void)
@@ -30,16 +34,20 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
-
+      // don't need to allocate for process's kernel stack here
+      
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
+      
+      /*
       char *pa = kalloc();
       if(pa == 0)
         panic("kalloc");
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
+      */
   }
   kvminithart();
 }
@@ -121,6 +129,24 @@ found:
     return 0;
   }
 
+  //initiate the kernel stack for each process
+  p->kernelpgtbl = createkernelpgtbl();
+  kernelpgtblinit(p->kernelpgtbl);
+
+  //kernel stack
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int)0);
+  kernelpgtblmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W, p->kernelpgtbl);
+  p->kstack = va;
+
+  //printf("kernel stack mapped\n");
+  //vmprint(p->kernelpgtbl);
+  //vmprint(p->pagetable);
+  // end
+
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -142,6 +168,13 @@ freeproc(struct proc *p)
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+  void* stackpa = (void*) kvmpa(p->kernelpgtbl, p->kstack);
+  if (p->kernelpgtbl)
+    proc_freekernelpgtbl(p->kernelpgtbl);
+  p->kernelpgtbl = 0;
+  kfree(stackpa);
+  p->kstack = 0;
+  
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -151,7 +184,6 @@ freeproc(struct proc *p)
   p->xstate = 0;
   p->state = UNUSED;
 }
-
 // Create a user page table for a given process,
 // with no user memory, but with trampoline pages.
 pagetable_t
@@ -193,6 +225,22 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
+}
+
+// Free a process's kernel page table, without also freeing the leaf physical memory pages.
+void
+proc_freekernelpgtbl(pagetable_t kernelpgtbl)
+{
+  for(int i = 0; i < 512; i++) {
+    pte_t pte = kernelpgtbl[i];
+    uint64 child = PTE2PA(pte);
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      proc_freekernelpgtbl((pagetable_t)child);
+      kernelpgtbl[i] = 0;
+    }
+  }
+  kfree((void*)kernelpgtbl);
 }
 
 // a user program that calls exec("/init")
@@ -473,7 +521,15 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        // Switch h/w page table register to the process's kernelpage table,
+        w_satp(MAKE_SATP(p->kernelpgtbl));
+        sfence_vma();
+
         swtch(&c->context, &p->context);
+
+        // switch to scheduler's kernel page table
+        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.

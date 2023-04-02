@@ -47,6 +47,61 @@ kvminit()
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
 
+pagetable_t 
+createkernelpgtbl()
+{
+  // An empty page table.
+  pagetable_t pagetable;
+  pagetable = uvmcreate();
+  if(pagetable == 0)
+    return 0;
+  return pagetable;
+}
+/*
+ * create a kernel page table for a new process.
+ */
+void
+kernelpgtblinit(pagetable_t kernelpgtbl)
+{
+  // uart registers
+  kernelpgtblmap(UART0, UART0, PGSIZE, PTE_R | PTE_W, kernelpgtbl);
+
+  // virtio mmio disk interface
+  kernelpgtblmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W, kernelpgtbl);
+
+  // CLINT
+  kernelpgtblmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W, kernelpgtbl);
+
+  // PLIC
+  kernelpgtblmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W, kernelpgtbl);
+
+  
+  // map kernel text executable and read-only.
+  kernelpgtblmap(KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X, kernelpgtbl);
+
+  // map kernel data and the physical RAM we'll make use of.
+  kernelpgtblmap((uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W, kernelpgtbl);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  kernelpgtblmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X, kernelpgtbl);
+ 
+  //printf("kernel page table initiated\n");
+}
+
+// add a mapping to the kernel page table for each process.
+// ? does not flush TLB or enable paging
+
+void
+kernelpgtblmap(uint64 va, uint64 pa, uint64 sz, int perm, pagetable_t kernelpgtbl)
+{
+  if(mappages(kernelpgtbl, va, sz, pa, perm) != 0)
+    {printf("kernel pgtbl map fail");
+    vmprint(kernelpgtbl);
+    panic("kvmmap");}
+}
+
+
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
 void
@@ -118,7 +173,8 @@ void
 kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 {
   if(mappages(kernel_pagetable, va, sz, pa, perm) != 0)
-    panic("kvmmap");
+    {printf("kvmmap fail");
+    panic("kvmmap");}
 }
 
 // translate a kernel virtual address to
@@ -126,13 +182,14 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 // addresses on the stack.
 // assumes va is page aligned.
 uint64
-kvmpa(uint64 va)
+kvmpa(pagetable_t pagetable, uint64 va)
 {
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
   
-  pte = walk(kernel_pagetable, va, 0);
+  pte = walk(pagetable, va, 0);
+
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
@@ -438,5 +495,36 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
+  }
+}
+
+void vmprinthelper(pagetable_t pagetable, int level);
+// Recursively print the page table
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+  vmprinthelper(pagetable, 0);
+}
+
+void
+vmprinthelper(pagetable_t pagetable, int level)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    //valid PTE
+    if(pte & PTE_V) {
+      for(int i = 0; i < level; i += 1){
+        printf(".. ");
+      }
+      printf("..");
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+    }
+    // this PTE points to a lower-level page table.
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      uint64 child = PTE2PA(pte);
+      vmprinthelper((pagetable_t)child, level + 1);
+    }
   }
 }
