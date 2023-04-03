@@ -20,7 +20,6 @@ exec(char *path, char **argv)
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
-
   begin_op();
 
   if((ip = namei(path)) == 0){
@@ -51,6 +50,9 @@ exec(char *path, char **argv)
     uint64 sz1;
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
+    if (sz1 >= PLIC)
+      goto bad;
+
     sz = sz1;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
@@ -70,6 +72,7 @@ exec(char *path, char **argv)
   uint64 sz1;
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
+
   sz = sz1;
   uvmclear(pagetable, sz-2*PGSIZE);
   sp = sz;
@@ -96,7 +99,7 @@ exec(char *path, char **argv)
     goto bad;
   if(copyout(pagetable, sp, (char *)ustack, (argc+1)*sizeof(uint64)) < 0)
     goto bad;
-
+  
   // arguments to user main(argc, argv)
   // argc is returned via the system call return
   // value, which goes in a0.
@@ -108,6 +111,14 @@ exec(char *path, char **argv)
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
     
+
+  //my code
+  //vmprint(p->pagetable);
+  //vmprint(p->kernelpgtbl);
+  uvmunmap(p->kernelpgtbl, 0, PGROUNDUP(oldsz) / PGSIZE, 0);
+  kvmcopy(pagetable, p->kernelpgtbl, 0, sz);
+  //end
+
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
@@ -116,6 +127,7 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+
   // vmprint
   if (p->pid == 1) 
     vmprint(p->pagetable);
@@ -123,8 +135,11 @@ exec(char *path, char **argv)
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
-  if(pagetable)
+  if(pagetable) 
+  {
     proc_freepagetable(pagetable, sz);
+  }
+
   if(ip){
     iunlockput(ip);
     end_op();

@@ -15,6 +15,7 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+pte_t * walk(pagetable_t pagetable, uint64 va, int alloc);
 /*
  * create a direct-map page table for the kernel.
  */
@@ -70,7 +71,7 @@ kernelpgtblinit(pagetable_t kernelpgtbl)
   kernelpgtblmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W, kernelpgtbl);
 
   // CLINT
-  kernelpgtblmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W, kernelpgtbl);
+  //kernelpgtblmap(CLINT, CLINT, 0x10000, PTE_R | PTE_W, kernelpgtbl);
 
   // PLIC
   kernelpgtblmap(PLIC, PLIC, 0x400000, PTE_R | PTE_W, kernelpgtbl);
@@ -109,6 +110,88 @@ kvminithart()
 {
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
+}
+
+// Allocate PTEs and physical memory to grow process from oldsz to
+// newsz, which need not be page aligned.  Returns new size or 0 on error.
+uint64
+kvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  char *mem;
+  uint64 a;
+
+  if(newsz < oldsz)
+    return oldsz;
+
+  oldsz = PGROUNDUP(oldsz);
+  for(a = oldsz; a < newsz; a += PGSIZE){
+    mem = kalloc();
+    if(mem == 0){
+      kvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+    memset(mem, 0, PGSIZE);
+    if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R) != 0){
+      kfree(mem);
+      kvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+  }
+  return newsz;
+}
+
+// Deallocate kernel pages to bring the process size from oldsz to
+// newsz.  oldsz and newsz need not be page-aligned, nor does newsz
+// need to be less than oldsz.  oldsz can be larger than the actual
+// process size.  Returns the new process size.
+uint64
+kvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= oldsz)
+    return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
+  }
+
+  return newsz;
+}
+
+// Given a parent process's page table, copy its memory into a child's page table.
+// Only Copies the page table
+// returns 0 on success, -1 on failure.
+// frees any allocated pages on failure.
+int
+kvmcopy(pagetable_t old, pagetable_t new, uint64 start, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  //char *mem;
+
+  for(i = PGROUNDUP(start); i < start + sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("kvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("kvmcopy: page not present");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    flags &= (~PTE_U);
+
+    //if((mem = kalloc()) == 0)
+      //goto err;
+    //memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      //kfree(mem);
+      goto err;
+    }
+  }
+  return 0;
+
+ err:
+  uvmunmap(new, PGROUNDUP(start), (i - PGROUNDUP(start))/ PGSIZE, 0);
+  return -1;
 }
 
 // Return the address of the PTE in page table pagetable
@@ -436,6 +519,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+  /*
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -453,6 +537,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     srcva = va0 + PGSIZE;
   }
   return 0;
+  */
+ return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -462,6 +548,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+  /*
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -495,7 +582,8 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
-  }
+  }*/
+  return copyinstr_new(pagetable, dst, srcva, max);
 }
 
 void vmprinthelper(pagetable_t pagetable, int level);

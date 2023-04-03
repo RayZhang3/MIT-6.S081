@@ -109,7 +109,10 @@ int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 
+// mycode
 void            proc_freekernelpgtbl(pagetable_t);
+int             growprockernel(int);
+// end
 
 
 // swtch.S
@@ -176,8 +179,14 @@ void            vmprint(pagetable_t);
 
 void            kernelpgtblinit(pagetable_t);
 void            kernelpgtblmap(uint64, uint64, uint64, int, pagetable_t);
+
 pagetable_t     createkernelpgtbl();
 
+// my code
+uint64          kvmalloc(pagetable_t, uint64, uint64);
+uint64          kvmdealloc(pagetable_t, uint64, uint64);
+int             kvmcopy(pagetable_t, pagetable_t, uint64, uint64);
+//end
 
 #ifdef SOL_COW
 #else
@@ -190,6 +199,10 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+
+//vmcopyin.c
+int copyin_new(pagetable_t, char*, uint64, uint64);
+int copyinstr_new(pagetable_t, char*, uint64, uint64);
 
 // plic.c
 void            plicinit(void);

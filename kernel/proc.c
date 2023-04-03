@@ -174,7 +174,7 @@ freeproc(struct proc *p)
   p->kernelpgtbl = 0;
   kfree(stackpa);
   p->kstack = 0;
-  
+
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -268,7 +268,10 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
-
+  //my code
+  kvmcopy(p->pagetable, p->kernelpgtbl, 0, p->sz);
+  // end
+  
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -277,29 +280,39 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+  
   release(&p->lock);
 }
 
 // Grow or shrink user memory by n bytes.
+// Grow or shrink kernel memory by n bytes.
 // Return 0 on success, -1 on failure.
 int
 growproc(int n)
 {
-  uint sz;
+  uint sz, oldsz;
   struct proc *p = myproc();
-
   sz = p->sz;
+  oldsz = p->sz;
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    // if error, dealloc
+    if((kvmcopy(p->pagetable, p->kernelpgtbl, oldsz, n)) != 0) {
+      sz = uvmdealloc(p->pagetable, sz, oldsz);
+      return -1;
+    }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    // if n < 0, kvm dealloc
+    kvmdealloc(p->kernelpgtbl, oldsz, sz);
   }
   p->sz = sz;
   return 0;
 }
+
+
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
@@ -316,11 +329,13 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  if((uvmcopy(p->pagetable, np->pagetable, p->sz) < 0) || kvmcopy(np->pagetable, np->kernelpgtbl, 0, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
+  
+
   np->sz = p->sz;
 
   np->parent = p;
@@ -340,11 +355,12 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
-
+  
   np->state = RUNNABLE;
 
   release(&np->lock);
 
+  
   return pid;
 }
 
