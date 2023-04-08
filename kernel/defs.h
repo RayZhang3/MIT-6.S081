@@ -8,7 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
-
+struct trapframe;
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -105,6 +105,10 @@ int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 
+//mycode start
+void            copyframe(struct trapframe *src, struct trapframe *dst);
+//end
+
 // swtch.S
 void            swtch(struct context*, struct context*);
 
@@ -138,6 +142,7 @@ int             argaddr(int, uint64 *);
 int             fetchstr(uint64, char*, int);
 int             fetchaddr(uint64, uint64*);
 void            syscall();
+void            backtrace();
 
 // trap.c
 extern uint     ticks;
