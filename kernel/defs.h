@@ -172,6 +172,14 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 
+// lab code start
+uint64          sbrk_lazy(uint64 n);
+void            vmprinthelper(pagetable_t pagetable, int level);
+
+// Recursively print the page table
+void            vmprint(pagetable_t pagetable);
+// end
+
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);

@@ -1,0 +1,38 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    // 相当于直接在Terminal中运行
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "xv6Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/kernel/kernel",
+            "args": [], //传入的参数
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}", //当前的工作目录
+            "miDebuggerServerAddress": "127.0.0.1:26000",
+            "miDebuggerPath": "/usr/bin/gdb-multiarch", //相当于用这个来debug kernel
+            //"miDebuggerPath": "/usr/bin/riscv64-unknown-elf-gdb", //相当于用这个来debug kernel
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true,
+                    
+                    "text": "-gdb-set follow-fork-mode child"
+                }
+            ],
+            "logging": {
+                "engineLogging": true,
+                "programOutput": true,
+            },
+            "preLaunchTask": "xv6build",
+        }
+    ]
+}
