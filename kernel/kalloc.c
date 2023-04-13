@@ -14,6 +14,12 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+// lab code start
+struct spinlock refCountLock;
+int refCount[PHYSTOP >> 12];
+// end
+
+
 struct run {
   struct run *next;
 };
@@ -28,6 +34,9 @@ kinit()
 {
   initlock(&kmem.lock, "kmem");
   freerange(end, (void*)PHYSTOP);
+  // lab code start
+  initlock(&refCountLock, "refCountLock");
+  // end
 }
 
 void
@@ -51,11 +60,20 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
-
   r = (struct run*)pa;
 
+  // lab code start
+  acquire(&refCountLock);
+  refCount[(uint64)pa >> 12] -= 1;
+  int count = refCount[(uint64)pa >> 12];
+  release(&refCountLock);
+  if (count > 0) {
+    return;
+  }
+  // end
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, PGSIZE);
   acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
@@ -72,11 +90,17 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+  }
   release(&kmem.lock);
-
-  if(r)
+  if(r) {
+    // lab code start
+    acquire(&refCountLock);
+    refCount[(uint64)r >> 12] = 1;
+    release(&refCountLock);
+    // end
     memset((char*)r, 5, PGSIZE); // fill with junk
+  }
   return (void*)r;
 }

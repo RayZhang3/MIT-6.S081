@@ -6,6 +6,8 @@
 #include "defs.h"
 #include "fs.h"
 
+extern struct spinlock refCountLock;
+extern int refCount[PHYSTOP >> 12];
 /*
  * the kernel's page table.
  */
@@ -15,6 +17,52 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+pte_t* walk(pagetable_t pagetable, uint64 va, int alloc);
+
+// Lab code
+// Allocate a new page 
+// Map the va to newpa (Modify the *pte directly)
+// modify pte for new page: pa->newpa, flag(disable PTE_RSW, enable PTE_W)
+// so don't use uvmunmap() and mappages() here
+uint64 
+COWhandler(pagetable_t pagetable, uint64 va) 
+{
+  pte_t *pte;
+  uint64 pa, newpa;
+  uint flags;
+  if ((pte = walk(pagetable, va, 0)) == 0) 
+  {
+    panic("invalid va");
+  }
+  if ( (*pte & PTE_U) == 0 ||  (*pte & PTE_V) == 0 || (*pte & PTE_RSW) == 0 ) {
+    return -1;
+  }
+  pa = PTE2PA(*pte);
+  // set the flag, disable the RSW and enable the PTE_W
+  // install the new page in PTE
+  if (*pte & PTE_RSW) 
+  {
+    //printf("pte flag before unmap: %p, points to %p\n", PTE_FLAGS(*pte), PTE2PA(*pte));
+    *pte |= PTE_W;
+    *pte &= ~PTE_RSW;
+    flags = PTE_FLAGS(*pte);
+  } else {
+    printf("The page is not RSW page\n");
+    return -1;
+  }
+  // Allocate a new page
+  newpa = (uint64) kalloc();
+  if (newpa == 0) {
+    printf("no free memory\n");
+    return -1;
+  }
+  // Copy old page to new page
+  // kfree will decrease the refCount, so don't decrease it now.
+  memmove((void*)newpa, (void*)pa, PGSIZE); 
+  kfree((void*) pa);
+  *pte = flags | PA2PTE(newpa);
+  return 0;
+}
 /*
  * create a direct-map page table for the kernel.
  */
@@ -159,6 +207,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if(*pte & PTE_V)
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
+    //printf("va %p maps to pa %p\n", a, pa);
     if(a == last)
       break;
     a += PGSIZE;
@@ -311,8 +360,32 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmcopy: page not present");
+    pa = PTE2PA(*pte);
+    *pte &= ~PTE_W;
+    *pte |= PTE_RSW;
+    flags = PTE_FLAGS(*pte);
+
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      printf("try to kfree %p\n", pa);
+      kfree((void*)pa);
+      goto err;
+    }
+    acquire(&refCountLock);
+    refCount[pa >> 12] += 1;
+    release(&refCountLock);
+  }
+  return 0;
+
+ err:
+  uvmunmap(new, 0, i / PGSIZE, 1);
+  return -1;
+  /*
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
@@ -333,6 +406,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
+  */
 }
 
 // mark a PTE invalid for user access.
@@ -351,9 +425,14 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
+
+// Lab code
+// Function: copy from src(physical address) to dstva(virtual address in user space)
+// If the dstva page is COW page, we need to allocate a new page for the dstva and update the pagetable PTE
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
+  //printf("copyout from src: %p to dstva: %p, length is %d\n", *src, dstva, len);
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -361,6 +440,16 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+
+    // lab code start
+    pte_t *pte = walk(pagetable, va0, 0);
+    if (*pte & PTE_RSW)
+    {
+      COWhandler(pagetable, va0); // allocate a new page, update the pte
+      pa0 = walkaddr(pagetable, va0); // set pa0 points to newpa
+    }
+    // end
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
