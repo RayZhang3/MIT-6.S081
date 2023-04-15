@@ -101,7 +101,7 @@ uartputc(int c)
     } else {
       uart_tx_buf[uart_tx_w] = c;
       uart_tx_w = (uart_tx_w + 1) % UART_TX_BUF_SIZE;
-      uartstart();
+      uartstart(); // process the char in buffer, the process holds the uart_tx lock, 
       release(&uart_tx_lock);
       return;
     }
@@ -149,14 +149,15 @@ uartstart()
       // it will interrupt when it's ready for a new byte.
       return;
     }
-    
+    // If there's char in buffer,
+
     int c = uart_tx_buf[uart_tx_r];
     uart_tx_r = (uart_tx_r + 1) % UART_TX_BUF_SIZE;
     
     // maybe uartputc() is waiting for space in the buffer.
     wakeup(&uart_tx_r);
     
-    WriteReg(THR, c);
+    WriteReg(THR, c); 
   }
 }
 
