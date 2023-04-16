@@ -17,6 +17,8 @@ struct entry *table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
+pthread_mutex_t lock[NBUCKET];            // declare a lock
+
 double
 now()
 {
@@ -48,10 +50,14 @@ void put(int key, int value)
   }
   if(e){
     // update the existing key.
+    pthread_mutex_lock(&lock[i]);       // acquire lock
     e->value = value;
+    pthread_mutex_unlock(&lock[i]);     // release lock
   } else {
     // the new is new.
+    pthread_mutex_lock(&lock[i]);       // acquire lock
     insert(key, value, &table[i], table[i]);
+    pthread_mutex_unlock(&lock[i]);     // release lock
   }
 }
 
@@ -114,6 +120,11 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+  // lab code start
+  for (int i = 0; i < NBUCKET; i++) {
+    pthread_mutex_init(&lock[i], NULL); // initialize the lock
+  }
+  // end
 
   //
   // first the puts
