@@ -347,7 +347,7 @@ exit(int status)
   }
 
   begin_op();
-  iput(p->cwd);
+  iput(p->cwd); //Drop a reference to an in-memory inode.
   end_op();
   p->cwd = 0;
 

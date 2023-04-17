@@ -109,7 +109,7 @@ piperead(struct pipe *pi, uint64 addr, int n)
   struct proc *pr = myproc();
   char ch;
 
-  acquire(&pi->lock);
+  acquire(&pi->lock); // protect pipe.
   while(pi->nread == pi->nwrite && pi->writeopen){  //DOC: pipe-empty
     if(pr->killed){
       release(&pi->lock);
@@ -117,11 +117,11 @@ piperead(struct pipe *pi, uint64 addr, int n)
     }
     sleep(&pi->nread, &pi->lock); //DOC: piperead-sleep
   }
-  for(i = 0; i < n; i++){  //DOC: piperead-copy
+  for(i = 0; i < n; i++){  //DOC: piperead-copy. exit when pipe-empty. (pi->nread == pi->nwrite) 
     if(pi->nread == pi->nwrite)
       break;
     ch = pi->data[pi->nread++ % PIPESIZE];
-    if(copyout(pr->pagetable, addr + i, &ch, 1) == -1)
+    if(copyout(pr->pagetable, addr + i, &ch, 1) == -1)  //dst: addr + i, src: pi->data[pi->nread++ % PIPESIZE]. Copy from kernel to user. pipe is in the kernel pace
       break;
   }
   wakeup(&pi->nwrite);  //DOC: piperead-wakeup
