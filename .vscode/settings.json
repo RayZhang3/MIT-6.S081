@@ -1,3 +1,11 @@
 {
-    "C_Cpp.errorSquiggles": "disabled"
+    "C_Cpp.errorSquiggles": "disabled",
+    "files.associations": {
+        "spinlock.h": "c",
+        "proc.h": "c",
+        "sleeplock.h": "c",
+        "memlayout.h": "c",
+        "riscv.h": "c",
+        "defs.h": "c"
+    }
 }
