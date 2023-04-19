@@ -6,6 +6,7 @@
         "sleeplock.h": "c",
         "memlayout.h": "c",
         "riscv.h": "c",
-        "defs.h": "c"
+        "defs.h": "c",
+        "stat.h": "c"
     }
 }

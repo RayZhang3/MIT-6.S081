@@ -49,6 +49,7 @@ struct {
   struct buf buckets[NBUCKETS];
   struct buf buf[NBUF];
   struct spinlock bucketsLock[NBUCKETS];
+  uint globalticks;
 } bcache;
 
 void
@@ -64,123 +65,174 @@ binit(void)
   }
   // initiate all the bcache, store in BUCKET 0
   for(b = bcache.buf; b < bcache.buf + NBUF; b++){
-    b->next = bcache.buckets[0].next;
     b->refcnt = 0;
-    bcache.buckets[0].next = b;
+    b->timestamp = 0;
     initsleeplock(&b->lock, "buffer");
+
+    // Link buffer to the first bucket (bucket 0)
+    b->next = bcache.buckets[0].next;
+    bcache.buckets[0].next = b;
   }
 }
 
 void
 updateTicks(struct buf* target) {
-  acquire(&tickslock);
+  //acquire(&tickslock);
   target->timestamp = ticks;
-  release(&tickslock);
+  //release(&tickslock);
 }
 
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
-int debug = 0;
+int debug = 1;
 
 static struct buf*
 bget(uint dev, uint blockno)
 {
+  
   struct buf *b;
-  acquire(&bcache.lock); // need to remove it
-  if (debug) {
-    printf("acquire bcache lock\n");
-  }
-  int index = hash(blockno, dev);
-  if (debug) {
-      printf("acquire bucket lock%d\n", index);
-  }
-  acquire(&bcache.bucketsLock[index]);
+  int dstBUCKET = hash(blockno, dev);
+
+  acquire(&bcache.bucketsLock[dstBUCKET]);
+
   // Is the block already cached?
-  for(b = bcache.buckets[index].next; b; b = b->next){
+  for(b = bcache.buckets[dstBUCKET].next; b; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
-      if (debug) {
-        printf("release bcache lock\n");
-      }
-      if (debug) {
-        printf("release bucket lock%d\n", index);
-      }
-      release(&bcache.bucketsLock[index]);
-      release(&bcache.lock);
+      release(&bcache.bucketsLock[dstBUCKET]);
       acquiresleep(&b->lock);
       return b;
     }
   }
+  release(&bcache.bucketsLock[dstBUCKET]);
 
+  //interrupt here
+  acquire(&bcache.lock);
 
-  // Not cached.
+  // check if the cache exist again, because we release the bucket lock and acquire global lock
+  acquire(&bcache.bucketsLock[dstBUCKET]);
+  for(b = bcache.buckets[dstBUCKET].next; b; b = b->next){
+      if(b->dev == dev && b->blockno == blockno){
+        b->refcnt++;
+        release(&bcache.bucketsLock[dstBUCKET]);
+        release(&bcache.lock);
+        acquiresleep(&b->lock);
+        return b;
+      }
+  }
+  release(&bcache.bucketsLock[dstBUCKET]);
+
+  // Not cached. still holds the dstBUCKET lock and global lock
   // check all the bucket to find the LRU
-  uint globalticks;
-  acquire(&tickslock);
-  globalticks = ticks;
-  release(&tickslock);
+  
+  //acquire(&tickslock);
+  bcache.globalticks = ticks;
+  //release(&tickslock);
 
+  //find the LRU item
   struct buf *target;
   target = 0;
   int srcBUCKET = 0;
-  int dstBUCKET = hash(blockno, dev);
-  for (int i = 0; i < NBUCKETS; i++) {
-    for(b = bcache.buckets[i].next; b ; b = b->next){
-      if (b->timestamp <= globalticks && b->refcnt == 0) {
-        target = b;
-        globalticks = b->timestamp;
-        srcBUCKET = i;
+  
+  for (b = bcache.buf; b < bcache.buf + NBUF; b++) {
+    if (b->refcnt == 0 && b->timestamp <= bcache.globalticks) {
+      target = b;
+      if (b->timestamp == 0) {
+        break;
       }
     }
-  }
-  if (debug) {
-      printf("the target is %p, globalticks: %d\n", target, globalticks);
   }
   if (!target) {
     panic("bget: no buffers");
   } else {
-    if (debug) {
-        printf("the target is %p, src: %d -> dst: %d\n", target, srcBUCKET, dstBUCKET);
-    }
-    //evict b and insert b
-    if (srcBUCKET != dstBUCKET) {
-      for (b = &bcache.buckets[srcBUCKET]; b ; b = b->next) {
-        if (b->next == target) {
-          if (debug) {
-            printf("evict %p, src: %d -> dst: %d\n", target, srcBUCKET, dstBUCKET);
-          }
-          b->next = target->next;
-        }
-      }
-      //insert b
-      target->next = bcache.buckets[dstBUCKET].next;
-      bcache.buckets[dstBUCKET].next = target;
-      if (debug) {
-            printf("insert %p, src: %d -> dst: %d\n", target, srcBUCKET, dstBUCKET);
-      }
-    }
+    srcBUCKET = hash(target->blockno, target->dev);
+
+    if (target->timestamp != 0 && dstBUCKET == srcBUCKET) {
+      //printf("timestamp > 0, next: %p, block:%d, dev: %d\n", target->next, target->blockno, target->dev);
+      acquire(&bcache.bucketsLock[dstBUCKET]);
       b = target;
       b->dev = dev;
       b->blockno = blockno;
       b->valid = 0;
       b->refcnt = 1;
-      updateTicks(b);
-      if (debug) {
-        printf("acquire buffer %p sleep lock\n", b);
-      }
+      release(&bcache.bucketsLock[dstBUCKET]);
+      release(&bcache.lock);
       acquiresleep(&b->lock);
-      if (debug) {
-        printf("release bucket lock%d\n", index);
+      return b;
+
+    } else if (target->timestamp == 0) {
+      srcBUCKET = 0;
+      if (srcBUCKET > dstBUCKET) {
+        acquire(&bcache.bucketsLock[srcBUCKET]);
+        acquire(&bcache.bucketsLock[dstBUCKET]);
+      } else if (srcBUCKET < dstBUCKET){
+        acquire(&bcache.bucketsLock[dstBUCKET]);
+        acquire(&bcache.bucketsLock[srcBUCKET]);
+      } else {
+        acquire(&bcache.bucketsLock[srcBUCKET]);
       }
-      release(&bcache.bucketsLock[index]);
-      if (debug) {
-        printf("release bcache lock\n");
+      //printf("timestamp = 0, next: %p, block:%d, dev: %d\n", target->next, target->blockno, target->dev);
+      
+      //remove the target in src list
+      for(b = &bcache.buckets[srcBUCKET]; b; b = b->next){
+        if (b->next == target) {
+          b->next = target->next;
+        }
+      }
+      // add the target to dst list
+      target->next = bcache.buckets[dstBUCKET].next;
+      bcache.buckets[dstBUCKET].next = target;
+
+      b = target;
+      b->dev = dev;
+      b->blockno = blockno;
+      b->valid = 0;
+      b->refcnt = 1;
+      release(&bcache.bucketsLock[dstBUCKET]);
+      if (srcBUCKET != dstBUCKET) {
+        release(&bcache.bucketsLock[srcBUCKET]);
       }
       release(&bcache.lock);
+      acquiresleep(&b->lock);
       return b;
-  }
 
+    } else {
+      if (srcBUCKET > dstBUCKET) {
+        acquire(&bcache.bucketsLock[srcBUCKET]);
+        acquire(&bcache.bucketsLock[dstBUCKET]);
+      } else if (srcBUCKET < dstBUCKET){
+        acquire(&bcache.bucketsLock[dstBUCKET]);
+        acquire(&bcache.bucketsLock[srcBUCKET]);
+      } else {
+        acquire(&bcache.bucketsLock[srcBUCKET]);
+      }
+      //remove the target in src list
+      for(b = &bcache.buckets[srcBUCKET]; b; b = b->next){
+        if (b->next == target) {
+          b->next = target->next;
+        }
+      }
+      // add the target to dst list
+      target->next = bcache.buckets[dstBUCKET].next;
+      bcache.buckets[dstBUCKET].next = target;
+
+      b = target;
+      b->dev = dev;
+      b->blockno = blockno;
+      b->valid = 0;
+      b->refcnt = 1;
+      
+      release(&bcache.bucketsLock[dstBUCKET]);
+      if (srcBUCKET != dstBUCKET) {
+        release(&bcache.bucketsLock[srcBUCKET]);
+      }
+
+      release(&bcache.lock);
+      acquiresleep(&b->lock);
+      return b;
+    }
+  }
 }
 
 
@@ -214,14 +266,12 @@ brelse(struct buf *b)
 {
   if(!holdingsleep(&b->lock))
     panic("brelse");
-  if (debug) {
-    printf("release buffer %p sleep lock\n", b);
-  }
   releasesleep(&b->lock);
   int index = hash(b->blockno, b->dev);
   acquire(&bcache.bucketsLock[index]);
-  updateTicks(b);
   b->refcnt--;
+  if (!b->refcnt)
+    updateTicks(b);
   release(&bcache.bucketsLock[index]);
 }
 
