@@ -85,7 +85,6 @@ updateTicks(struct buf* target) {
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
-int debug = 1;
 
 static struct buf*
 bget(uint dev, uint blockno)
@@ -107,11 +106,12 @@ bget(uint dev, uint blockno)
   }
   release(&bcache.bucketsLock[dstBUCKET]);
 
-  //interrupt here
+  //If interrup: other process may add cache to dstBUCKET
   acquire(&bcache.lock);
 
   // check if the cache exist again, because we release the bucket lock and acquire global lock
   acquire(&bcache.bucketsLock[dstBUCKET]);
+
   for(b = bcache.buckets[dstBUCKET].next; b; b = b->next){
       if(b->dev == dev && b->blockno == blockno){
         b->refcnt++;
@@ -121,16 +121,15 @@ bget(uint dev, uint blockno)
         return b;
       }
   }
+
   release(&bcache.bucketsLock[dstBUCKET]);
 
-  // Not cached. still holds the dstBUCKET lock and global lock
-  // check all the bucket to find the LRU
+  // Not cached. holds the global lock
+  // check all the bucket to find the LRU? No, we need to lock and unlock every bucket, it may lead to race.
   
-  //acquire(&tickslock);
   bcache.globalticks = ticks;
-  //release(&tickslock);
 
-  //find the LRU item
+  //find the LRU cache
   struct buf *target;
   target = 0;
   int srcBUCKET = 0;
@@ -143,13 +142,19 @@ bget(uint dev, uint blockno)
       }
     }
   }
+
+  // No free cache
   if (!target) {
     panic("bget: no buffers");
   } else {
-    srcBUCKET = hash(target->blockno, target->dev);
+    // Free cache found, find the src BUCKET
+    if (target->timestamp == 0) {
+      srcBUCKET = 0;
+    } else {
+      srcBUCKET = hash(target->blockno, target->dev);
+    }
 
-    if (target->timestamp != 0 && dstBUCKET == srcBUCKET) {
-      //printf("timestamp > 0, next: %p, block:%d, dev: %d\n", target->next, target->blockno, target->dev);
+    if (dstBUCKET == srcBUCKET) {
       acquire(&bcache.bucketsLock[dstBUCKET]);
       b = target;
       b->dev = dev;
@@ -161,52 +166,9 @@ bget(uint dev, uint blockno)
       acquiresleep(&b->lock);
       return b;
 
-    } else if (target->timestamp == 0) {
-      srcBUCKET = 0;
-      if (srcBUCKET > dstBUCKET) {
-        acquire(&bcache.bucketsLock[srcBUCKET]);
-        acquire(&bcache.bucketsLock[dstBUCKET]);
-      } else if (srcBUCKET < dstBUCKET){
-        acquire(&bcache.bucketsLock[dstBUCKET]);
-        acquire(&bcache.bucketsLock[srcBUCKET]);
-      } else {
-        acquire(&bcache.bucketsLock[srcBUCKET]);
-      }
-      //printf("timestamp = 0, next: %p, block:%d, dev: %d\n", target->next, target->blockno, target->dev);
-      
-      //remove the target in src list
-      for(b = &bcache.buckets[srcBUCKET]; b; b = b->next){
-        if (b->next == target) {
-          b->next = target->next;
-        }
-      }
-      // add the target to dst list
-      target->next = bcache.buckets[dstBUCKET].next;
-      bcache.buckets[dstBUCKET].next = target;
-
-      b = target;
-      b->dev = dev;
-      b->blockno = blockno;
-      b->valid = 0;
-      b->refcnt = 1;
-      release(&bcache.bucketsLock[dstBUCKET]);
-      if (srcBUCKET != dstBUCKET) {
-        release(&bcache.bucketsLock[srcBUCKET]);
-      }
-      release(&bcache.lock);
-      acquiresleep(&b->lock);
-      return b;
-
     } else {
-      if (srcBUCKET > dstBUCKET) {
-        acquire(&bcache.bucketsLock[srcBUCKET]);
-        acquire(&bcache.bucketsLock[dstBUCKET]);
-      } else if (srcBUCKET < dstBUCKET){
-        acquire(&bcache.bucketsLock[dstBUCKET]);
-        acquire(&bcache.bucketsLock[srcBUCKET]);
-      } else {
-        acquire(&bcache.bucketsLock[srcBUCKET]);
-      }
+      acquire(&bcache.bucketsLock[srcBUCKET]);
+      acquire(&bcache.bucketsLock[dstBUCKET]);
       //remove the target in src list
       for(b = &bcache.buckets[srcBUCKET]; b; b = b->next){
         if (b->next == target) {
@@ -224,12 +186,10 @@ bget(uint dev, uint blockno)
       b->refcnt = 1;
       
       release(&bcache.bucketsLock[dstBUCKET]);
-      if (srcBUCKET != dstBUCKET) {
-        release(&bcache.bucketsLock[srcBUCKET]);
-      }
-
+      release(&bcache.bucketsLock[srcBUCKET]);
       release(&bcache.lock);
       acquiresleep(&b->lock);
+      
       return b;
     }
   }
