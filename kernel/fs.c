@@ -377,12 +377,14 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
-
+  uint addr, *a, *second_a;
+  struct buf *bp, *second_bp;
+  //printf("bmap: bn = %d\n",bn);
   if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
+    if((addr = ip->addrs[bn]) == 0){
       ip->addrs[bn] = addr = balloc(ip->dev);
+      //printf("allocate direct block\n");
+    }
     return addr;
   }
   bn -= NDIRECT;
@@ -398,6 +400,36 @@ bmap(struct inode *ip, uint bn)
       log_write(bp);
     }
     brelse(bp);
+    //printf("allocate indirect block\n");
+    return addr;
+  }
+  bn -= NINDIRECT;
+
+  if (bn < NDOUBLYINDIRECT) {
+    // Load doubly-indirect block, allocating if necessary.
+    int firstIndex = bn / (BSIZE / sizeof(uint));
+    int secondIndex = bn % (BSIZE / sizeof(uint));
+    // read the doublyndirect block
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    // read the first-level datablock
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[firstIndex]) == 0){
+      a[firstIndex] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+
+    // read the second-level datablock
+    second_bp = bread(ip->dev, addr);
+    second_a = (uint*)second_bp->data;
+    if ((addr = second_a[secondIndex]) == 0){
+      second_a[secondIndex] = addr = balloc(ip->dev);
+      log_write(second_bp);
+    }
+    brelse(second_bp);
+    //printf("allocate doublyindirect block\n");
     return addr;
   }
 
@@ -409,10 +441,10 @@ bmap(struct inode *ip, uint bn)
 void
 itrunc(struct inode *ip)
 {
-  int i, j;
+  int i, j, k;
   struct buf *bp;
   uint *a;
-
+  //printf("itrunc: ip = %p\n",ip);
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
@@ -431,6 +463,32 @@ itrunc(struct inode *ip)
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
   }
+
+  // lab code start
+  if(ip->addrs[NDIRECT + 1]){
+    struct buf *second_bp;
+    uint *second_a;
+    // read the first-level block
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++){
+      if(a[j]) {
+        second_bp = bread(ip->dev, a[j]);
+        second_a = (uint*)second_bp->data;
+        for (k = 0; k < NINDIRECT; k++) {
+          if (second_a[k])
+            bfree(ip->dev, second_a[k]);
+        }
+        brelse(second_bp);
+        bfree(ip->dev, a[j]);
+        a[j] = 0;
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
+  }
+  // end
 
   ip->size = 0;
   iupdate(ip);
