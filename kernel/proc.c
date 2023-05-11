@@ -285,6 +285,7 @@ fork(void)
   }
   np->sz = p->sz;
 
+  // Lab mmap 
   // ensure that the child has the same mapped regions as the parent
   memmove(np->vma_list, p->vma_list, sizeof(struct vma) * 16);
   
@@ -293,7 +294,8 @@ fork(void)
       filedup(p->vma_list->f);
     }
   }
-  
+  // Lab end
+
   np->parent = p;
 
   // copy saved user registers.
@@ -365,6 +367,8 @@ exit(int status)
     }
   }
 
+  // Lab mmap
+  // munmap all the VMAs
   struct vma* target = myproc()->vma_list;
   uint64 munmap_addr;
   for (; target < &(myproc()->vma_list[VMA_SIZE]); target++) {
@@ -376,7 +380,7 @@ exit(int status)
       target->valid = 0;
     }
   }
-
+  // Lab end
   begin_op();
   iput(p->cwd);
   end_op();

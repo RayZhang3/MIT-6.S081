@@ -487,10 +487,12 @@ sys_pipe(void)
 }
 
 //Lab code start
+
+// System call wrapper for mmap. This function receives its arguments from the
+// user space, validates them, and then invokes the kernel's munmap function.
 uint64
 sys_mmap(void)
 {
-  //printf("syscall mmap\n");
   uint64 addr;
   int length, prot, flags, fd, offset;
   if (argaddr(0, &addr) < 0 || argint(1, &length) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argint(4, &fd) < 0 || argint(5, &offset) < 0) {
@@ -499,10 +501,11 @@ sys_mmap(void)
   return (uint64)mmap((void*)addr, length, prot, flags, fd, offset);
 }
 
+// System call wrapper for munmap. This function receives its arguments from the
+// user space, validates them, and then invokes the kernel's munmap function.
 uint64
 sys_munmap(void)
 {
-  //printf("syscall munmap\n");
   uint64 addr;
   int length;
   if (argaddr(0, &addr) < 0 || argint(1, &length) < 0) {
@@ -510,14 +513,16 @@ sys_munmap(void)
   }
   return munmap((void*)addr, length);
 }
-//Lab code end
 
 int handler(struct proc* p){
     uint64 va = r_stval();
+    // Check VMA address
     if (va < VMA_START || va >= VMA_END) {
       p->killed = 1;
     } else {
-      printf("page fault at %p\n", va);
+      //printf("page fault at %p\n", va);
+
+      // Alloc new page and read part of file to page
       uint64 ka = (uint64)kalloc();
       if (ka == 0) {
         p->killed = 1;
@@ -526,20 +531,20 @@ int handler(struct proc* p){
         memset((void*)ka, 0, PGSIZE);
         va = PGROUNDDOWN(va);
         struct vma* target;
-        // search vma list
+        // Search VMA list of this process
         target = find_vma(myproc()->vma_list, va);
         if (target == 0) {
           printf("can not find vma\n");
           p->killed = -1;
           return -1;
         }
-        //read the file, read the page at (va - vm_start) to ka, map va --> ka 
+        // Read the file, read the page at (va - vm_start) to ka, then map va ----> ka 
         struct file* f = target->f;
         int offset = va - target->vm_start;
         ilock(f->ip);
         readi(f->ip, 0, ka, offset, 4096);
         iunlock(f->ip);
-        //Perm: you can assume that prot is PROT_READ or PROT_WRITE or both.
+        // Perm: you can assume that prot is PROT_READ or PROT_WRITE or both.
         int perm = target->perm & 0xf;
         int PTE_perm = 0;
         PTE_perm |= PTE_U;
@@ -552,7 +557,7 @@ int handler(struct proc* p){
         if (perm & PROT_EXEC) {
           PTE_perm |= PTE_X;
         }
-
+        // map page
         if (mappages(p->pagetable, va, PGSIZE, ka, PTE_perm) != 0) {
           kfree((void*)ka);
           p->killed = 1;
@@ -563,8 +568,10 @@ int handler(struct proc* p){
     return 0;
 }
 
-//Find an unused region in the process's address space in which to map the file, 
-// and add a VMA to the process's table of mapped regions.
+// Find an unused region in the process's address space in which to map the file, 
+// Add a VMA to the process's table of mapped regions.
+// mmap() maps a file into a process's address space. If successful, it returns
+// the start address of the mapped region. If unsuccessful, it returns -1.
 uint64 mmap(void *addr, int length, int prot, int flags, int fd, int offset) {
   struct vma* target = myproc()->vma_list;
   for (; target < &(myproc()->vma_list[VMA_SIZE]); target++) {
@@ -572,19 +579,24 @@ uint64 mmap(void *addr, int length, int prot, int flags, int fd, int offset) {
       if (insert_vma(myproc()->vma_list, target, length, prot, flags, myproc()->ofile[fd]) < 0) {
         return 0xffffffffffffffff;
       }
+      // Increase the ref of file
       filedup(myproc()->ofile[fd]);
-      printf("mmap length %d at %p, perm is %d\n", target->length, target->vm_start, target->perm);
+      //printf("mmap length %d at %p, perm is %d\n", target->length, target->vm_start, target->perm);
       return target->vm_start;
     }
   }
   return 0xffffffffffffffff;
 };
 
+// munmap() unmaps a region of a process's address space that was previously
+// mapped by mmap. If the region was mapped with the MAP_SHARED flag, and the
+// region is writable, the function writes back any changes made in the mapped
+// region to the file before unmapping. If successful, the function returns 0.
+// If unsuccessful, it returns -1.
 int munmap(void *addr, int length) {
   uint64 munmap_addr = (uint64) addr;
   struct vma* vma_item = find_vma(myproc()->vma_list, munmap_addr);
   struct file* f = vma_item->f;
-  //int ret = 0;
   if (vma_item == 0) {
     return -1;
   }
@@ -596,23 +608,28 @@ int munmap(void *addr, int length) {
   }
   munmap_addr = PGROUNDDOWN(munmap_addr);
   int npages = PGROUNDDOWN(length) / PGSIZE;
+  // MAP_SHARED & VMA WRITABLE
   if (vma_item->flags & MAP_SHARED && (vma_item->perm & PROT_WRITE)){
-    printf("write %d pages at %p\n", npages, addr);
+    //printf("write %d pages at %p\n", npages, addr);
     filewrite(f, (uint64)addr, length);
   }
+  // munmap all the VMA
   if (vma_item->length == length) {
     uvmunmap(myproc()->pagetable, munmap_addr, npages, 1);
+    //decrease the ref of file
     fileclose(vma_item->f);
     vma_item->valid = 0;
+  // munmap from the head of VMA
   } else if (vma_item->vm_start == (uint64)addr) {
     uvmunmap(myproc()->pagetable, munmap_addr, npages, 1);
     vma_item->vm_start += length;
     vma_item->length -= length;
+  // munmap from the end of VMA
   } else if (vma_item->vm_end == (uint64)addr + length) {
     uvmunmap(myproc()->pagetable, munmap_addr, npages, 1);
     vma_item->vm_end -= length;
     vma_item->length -= length;
   }
-  printf("munmap length %d at %p, prot is %d\n", length, addr);
+  //printf("munmap length %d at %p, prot is %d\n", length, addr);
   return 0;
 };

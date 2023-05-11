@@ -441,8 +441,13 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 }
 
 //Lab code start
+
+// This function searches through the virtual memory areas (VMAs) to find the 
+// VMA that includes the provided address. It returns a pointer to the VMA if 
+// it's found, and returns 0 otherwise.
+
 struct vma* find_vma(struct vma vmalist[], uint64 addr) {
-  printf("try to access addr %p \n", addr);
+  //printf("try to access addr %p \n", addr);
   struct vma* vma_item = &vmalist[0];
   for (; vma_item < &vmalist[VMA_SIZE]; vma_item++) {
     if (vma_item->valid) {
@@ -454,7 +459,10 @@ struct vma* find_vma(struct vma vmalist[], uint64 addr) {
   return 0;
 }
 
-
+// This function is used to find a suitable address space for a new virtual 
+// memory area (VMA). It scans through existing VMAs in the process's VMA list 
+// to find a gap that's large enough for the new VMA. It returns the start 
+// address of the gap if it's found, and returns 0 otherwise.
 uint64 get_vma_addr(struct vma vmalist[], uint64 length) {
   uint64 addr = 0x20000000;
   struct vma* vma_item = myproc()->vma_list;
@@ -467,10 +475,14 @@ uint64 get_vma_addr(struct vma vmalist[], uint64 length) {
     printf("addr error, addr = %p\n", addr);
     return 0;
   }
-  printf("addr = %p\n", addr);
+  //printf("addr = %p\n", addr);
   return addr;
 }
 
+// This function is used to insert a new VMA into the process's VMA list. It 
+// first validates the permissions and flags, and then initializes the new VMA 
+// with the given parameters. If successful, it returns 0. If unsuccessful, it 
+// returns -1.
 int insert_vma(struct vma vmalist[], struct vma* target, int length, int perm, int flags, struct file *f) {
   uint64 dst = get_vma_addr(vmalist, length);
   if (dst == 0) {
