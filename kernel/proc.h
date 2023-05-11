@@ -1,3 +1,4 @@
+#include "fcntl.h"
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -82,10 +83,21 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+//Keep track of what mmap has mapped for each process.
+struct vma {
+  int valid;
+  uint64 vm_start;
+  uint64 vm_end;
+  uint64 length;
+  int perm;
+  int flags;
+  struct file *f;
+  struct spinlock lock;
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
-
   // p->lock must be held when using these:
   enum procstate state;        // Process state
   struct proc *parent;         // Parent process
@@ -103,4 +115,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vma_list[VMA_SIZE];
 };

@@ -8,6 +8,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct vma;
 
 // bio.c
 void            binit(void);
@@ -172,6 +173,11 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 
+uint64          mmap(void *addr, int length, int prot, int flags, int fd, int offset);
+int             munmap(void *addr, int length);
+struct vma*     find_vma(struct vma*, uint64);
+int             insert_vma(struct vma*, struct vma* target, int length, int perm, int flags,struct file *f);
+uint64          get_vma_addr(struct vma*, uint64 length);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);
@@ -185,3 +191,6 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+//sysfile.c
+int handler(struct proc* p);

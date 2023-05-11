@@ -5,7 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "file.h"
 /*
  * the kernel's page table.
  */
@@ -171,8 +175,14 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
+    if((*pte & PTE_V) == 0){
+      // Lab code start
+      if (find_vma(myproc()->vma_list, a) != 0) {
+        continue;
+      }
+      // end
       panic("uvmunmap: not mapped");
+    }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -429,3 +439,59 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+//Lab code start
+struct vma* find_vma(struct vma vmalist[], uint64 addr) {
+  printf("try to access addr %p \n", addr);
+  struct vma* vma_item = &vmalist[0];
+  for (; vma_item < &vmalist[VMA_SIZE]; vma_item++) {
+    if (vma_item->valid) {
+      if (vma_item->vm_start <= addr && vma_item->vm_end > addr) {
+        return vma_item;
+      }
+    }
+  }
+  return 0;
+}
+
+
+uint64 get_vma_addr(struct vma vmalist[], uint64 length) {
+  uint64 addr = 0x20000000;
+  struct vma* vma_item = myproc()->vma_list;
+  for (; vma_item < &vmalist[NOFILE]; vma_item++) {
+    if (vma_item->valid && vma_item->vm_end > addr) {
+      addr = vma_item->vm_end;
+    }
+  }
+  if (addr >= VMA_END || addr + length >= VMA_END) {
+    printf("addr error, addr = %p\n", addr);
+    return 0;
+  }
+  printf("addr = %p\n", addr);
+  return addr;
+}
+
+int insert_vma(struct vma vmalist[], struct vma* target, int length, int perm, int flags, struct file *f) {
+  uint64 dst = get_vma_addr(vmalist, length);
+  if (dst == 0) {
+    printf("addr error: 0\n");
+    return -1;
+  }
+  if (!f->readable && (perm & PROT_READ)) {
+    printf("perm error: read\n");
+    return -1;
+  }
+  if (!f->writable && (perm & PROT_WRITE) && !(flags & MAP_PRIVATE)) {
+    printf("perm error: write\n");
+    return -1;
+  }
+  target->f = f;
+  target->length = length;
+  target->perm = perm;
+  target->flags = flags;
+  target->vm_start = dst;
+  target->vm_end = dst + length;
+  target->valid = 1;
+  return 0;
+}
+//Lab code end

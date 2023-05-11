@@ -49,6 +49,9 @@ procinit(void)
       initlock(&p->lock, "proc");
       p->kstack = KSTACK((int) (p - proc));
   }
+  // Lab code start
+  //initlock(&p->vma_list)
+  // end
 }
 
 // Must be called with interrupts disabled,
@@ -282,6 +285,15 @@ fork(void)
   }
   np->sz = p->sz;
 
+  // ensure that the child has the same mapped regions as the parent
+  memmove(np->vma_list, p->vma_list, sizeof(struct vma) * 16);
+  
+  for (int i = 0; i < VMA_SIZE; i++) {
+    if (p->vma_list->valid) {
+      filedup(p->vma_list->f);
+    }
+  }
+  
   np->parent = p;
 
   // copy saved user registers.
@@ -350,6 +362,18 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  struct vma* target = myproc()->vma_list;
+  uint64 munmap_addr;
+  for (; target < &(myproc()->vma_list[VMA_SIZE]); target++) {
+    if (target->valid) {
+      munmap_addr = PGROUNDDOWN(target->vm_start);
+      int npages = PGROUNDDOWN(target->length) / PGSIZE;
+      uvmunmap(myproc()->pagetable, munmap_addr, npages, 1);
+      fileclose(target->f);
+      target->valid = 0;
     }
   }
 

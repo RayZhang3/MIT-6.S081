@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -67,7 +68,15 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  // Lab code start: handle page fault //
+  // mmap should not allocate physical memory or read the file, do it here
+  } else if (r_scause() == 15 || r_scause() == 13) { //15: store 13: load
+    if (handler(p) < 0) {
+      printf("handler error");
+    };
+  }
+  // Lab code end
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
@@ -82,6 +91,7 @@ usertrap(void)
 
   usertrapret();
 }
+
 
 //
 // return to user space
