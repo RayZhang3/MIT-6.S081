@@ -1,6 +1,6 @@
 # 总览
 Lab及对应的Branch
-| Lab Feature                | branch          | Description                                                                                     |
+| Lab Feature                | Branch          | Description                                                                                     |
 |-----------------------|---------------------|------------------------------------------------------------------------------------------------|
 | Xv6 and Unix utilities | util      | 实现几个用户态程序、unix实用工具，包括pingpong, 用多线程实现并行化的素数筛                        |
 | system calls          | syscall     | 添加syscall系统追踪，sysinfo系统调用                                                           |
@@ -13,8 +13,6 @@ Lab及对应的Branch
 | file system           | fs | 为xv6的文件系统添加多级索引以及符号链接的支持。                                                  |
 | mmap                  | mmap  | unix调用mmap的简单版本，支持将文件映射到一片用户虚拟内存区域内，并支持将对其的修改写回磁盘。         |
 | networking            | net         | 熟悉系统驱动与外围设备的交互、内存映射寄存器与DMA数据传输，实现与E1000网卡交互的核心方法：transmit和recv. |
-
-#6.S081 Part 1 Lab1-4
 
 # Lab 1. Xv6 and Unix utilities
 ### 相关知识
