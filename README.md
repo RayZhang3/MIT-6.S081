@@ -41,10 +41,10 @@ Makefile
 kernel/kalloc.c, proc.c, proc.h, syscall.c, syscall.h. 
 user/user.h, usys.pl
 ### 创建系统调用
-1. ==在内核映像(/kernel下)中实现系统调用==
-2. ==在syscall.h中添加系统调用号==
-3. ==在系统调用表的最后加入一个表项==，extern 全局声明新的内核调用函数，syscalls映射表中，加入系统调用号到系统调用函数指针的映射。
-4. ==在用户空间下添加访问系统调用的方式== （内联汇编的C函数，通过汇编代码直接访问寄存器）
+1. 在内核映像(/kernel下)中实现系统调用
+2. 在syscall.h中添加系统调用号
+3. 在系统调用表的最后加入一个表项，extern 全局声明新的内核调用函数，syscalls映射表中，加入系统调用号到系统调用函数指针的映射。
+4. 在用户空间下添加访问系统调用的方式 （内联汇编的C函数，通过汇编代码直接访问寄存器）
    通过在脚本文件usys.pl 中，加入内核态到用户态的跳板函数，随后脚本文件会生成usys.S汇编文件，自动生成相应的汇编代码，sleep的用户态跳板函数的汇编代码如下。先将系统调用号放置到a7中，随后调用ecall。
 ``` usys.S中的汇编代码，用户态调用时，将指定的系统调用号写入到a7寄存器中，随后执行ecall
 .global sleep
@@ -130,7 +130,7 @@ sys_sysinfo(void)
 # Lab 3. Page tables 页表
 ### 目标
 1. xv6原本的设计是，用户进程在用户态使用各自的用户态页表，在进入到内核态时，切换到内核页表（通过在trampoline.S中修改satp(Supervisor Address Translation and Protection Register寄存器），然而该内核态页表是全局共享的。
-2. ==Lab目标==：每一个==进程进入到内核态后，都拥有自己的独立内核态页表==，并在此基础上，在内核态页表中维护一个用户态页表的映射，==允许内核解引用用户指针==。（虚拟地址）
+2. Lab目标：每一个进程进入到内核态后，都拥有自己的独立内核态页表，并在此基础上，在内核态页表中维护一个用户态页表的映射，允许内核解引用用户指针。（虚拟地址）
 3. 优势：原本的copyin是通过软件模拟访问页表的过程进行地址转换的，现在我们在内核态页表维护映射副本，可以利用CPU的硬件寻址功能直接进行寻址。
 
 ### 相关知识
@@ -194,20 +194,21 @@ sys_sysinfo(void)
 6. xv6中有跳板函数，被映射在用户空间和内核空间的高地址，位于同样的虚拟地址，这样切换页表时它仍可以正常工作。跳板函数包括uservec（处理用户空间开始的陷阱）和userret（内核态切换到用户态)。 由于stvec指向uservec，处理trap时会先跳转到这里，此时CPU处于特权模式，但是处于用户页表
 	1. uservec: 保存现场（用户寄存器）到trapframe中，加载内核栈指针和内核页表，随后跳转到异常处理函数usertrap()进行处理。
 	2. userret: 从trapframe恢复用户模式的寄存器，加载用户页表，通过sret返回用户模式
-7. ==write系统调用执行过程==：
-	1. ==用户程序设置好write库函数的参数，并将对应的系统调用号加载到a7寄存器，执行ECALL指令，RISC-V ECALL指令会做三件事：切换到supervisor mode（监督模式)，修改程序计数器，保存当前程序计数器到SEPC中，跳转到STVEC寄存器指向的地址（也就是跳板函数）。==
-	2. 现在处于supervisor mode，已经==跳转到（内核处理代码）trampoline page的uservec()。现在需要保存用户寄存器、保存CPU核的编号、切换到内核页表、切换到内核栈、加载后续执行函数的指针==。
-	3. usertrap()用来处理系统调用、运算除0、缺页错误、设备中断。它会==检查SCAUSE寄存器检查触发trap的原因，并执行相应的处理。== 在用户态下进行ecall时，会将SCAUSE寄存器设置为8 (Environment call from U-mode). 
+7. write系统调用执行过程：
+	1. 用户程序设置好write库函数的参数，并将对应的系统调用号加载到a7寄存器，执行ECALL指令，RISC-V ECALL指令会做三件事：切换到supervisor mode（监督模式)，修改程序计数器，保存当前程序计数器到SEPC中，跳转到STVEC寄存器指向的地址（也就是跳板函数）。
+	2. 现在处于supervisor mode，已经跳转到（内核处理代码）trampoline page的uservec()。现在需要保存用户寄存器、保存CPU核的编号、切换到内核页表、切换到内核栈、加载后续执行函数的指针。
+	3. usertrap()用来处理系统调用、运算除0、缺页错误、设备中断。它会【检查SCAUSE寄存器检查触发trap的原因，并执行相应的处理。】在用户态下进行ecall时，会将SCAUSE寄存器设置为8 (Environment call from U-mode). 
 	   首先使STVEC指向kernelvec，这是因为现在处于内核空间，对于trap需要有不一样的处理。usertrap() 中，在处理系统调用而不是其他中断时，需要保存程序计数器到trapframe中，并保持中断打开，此时再调用syscall()函数
-	4. ==syscall() 根据trapframe中保存的系统调用号，查找系统调用表调用对应的函数sys_write并执行。==
-	5. ==执行sys_write()，从trapframe中获取参数并执行。==
+	4. syscall() 根据trapframe中保存的系统调用号，查找系统调用表调用对应的函数sys_write并执行。
+	5. 执行sys_write()，从trapframe中获取参数并执行。
 	6. usertrap()继续调用usertrapret()函数：关中断，更新STVEC寄存器指向trampoline page的uservec，更改trapframe,以便下次用户空间转换到内核空间时使用。更改特权模式，通过sret指令，设置程序计数器为SEPC寄存器的值，[省略一部分](https://mit-public-courses-cn-translatio.gitbook.io/mit6-s081/lec06-isolation-and-system-call-entry-exit-robert/6.7-usertrapret)
-	7. 最后==调用trampoline代码中的userret函数，加载trapframe保存的寄存器值，执行sret指令：切换回user mode，将SEPC寄存器的值拷贝到PC，重新打开中断。==
+	7. 最后调用trampoline代码中的userret函数，加载trapframe保存的寄存器值，执行sret指令：切换回user mode，将SEPC寄存器的值拷贝到PC，重新打开中断。
 
 ### Lab目标
-1. 实现backtrace() 功能，打印出调用栈便于调试。[slides](https://www.cs.cornell.edu/courses/cs3410/2019sp/schedule/slides/10-calling-notes-bw.pdf)
-2. 添加简单的系统调用alarm,在进程使用CPU时定时发出警报，用于限制进程消耗的CPU时间和定期操作。这个alarm实际上是用户级中断/异常处理程序的原始形式，主要是为了page fault做铺垫。
-3. 需要新增一个sigalarm(interval, handler)的系统调用，它会使得调用这个系统调用的进程在CPU每走过interval个ticks时自动地调用handler函数。handler函数默认会调用sigreturn()，因此需要在sig_return()中恢复寄存器值。
+1. 实现backtrace() 功能，打印出调用栈便于调试。
+    [slides](https://www.cs.cornell.edu/courses/cs3410/2019sp/schedule/slides/10-calling-notes-bw.pdf)
+3. 添加简单的系统调用alarm,在进程使用CPU时定时发出警报，用于限制进程消耗的CPU时间和定期操作。这个alarm实际上是用户级中断/异常处理程序的原始形式，主要是为了page fault做铺垫。
+4. 需要新增一个sigalarm(interval, handler)的系统调用，它会使得调用这个系统调用的进程在CPU每走过interval个ticks时自动地调用handler函数。handler函数默认会调用sigreturn()，因此需要在sig_return()中恢复寄存器值。
 
 ### backtrace()实现
  栈帧结构：栈从高地址往低地址增长，fp指向当前栈帧开始地址，sp指向栈帧结束地址，因此fp - 8存储return address, fp - 16存储previous address， 即上一层栈帧的fp开始地址。
@@ -360,7 +361,7 @@ COWhandler()的功能：首先检查该页面是否合法（存在对应页表�
 11. 为什么线程调度只需要保存callee-saved寄存器？可以这么理解：caller-saved寄存器已经由调用者保存到栈中了，callee-saved寄存器则没有保存，是这个线程执行状态的一部分。
 12. 线程切换或上下文切换：可能会在任何时刻发生，当操作系统决定停止线程执行时，需要保存被暂停线程的所有状态，以便再次恢复该线程。
 13. xv6进程切换的过程：无论是通过时钟中断(usertrap)、还是线程主动放弃CPU(sleep, exit)，都会调用yield()，yield首先挂起当前进程，再通过调用sched()从当前进程swtch()到调度器线程， 再进一步调用swtch() 【在调用swtch()之前，会保存caller-saved register)。 由于上下文切换永远发生在swtch()调用，从就绪到恢复执行也就是swtch的返回过程，会从栈中恢复caller-saved寄存器的值，因此，用于保存上下文的context结构体只需要保存callee-saved寄存器、ra、sp即可。】。每个CPU有一个调度器进程，对于schedule()来说，从进程调度中返回后，首先修改cpu所运行的进程为他自己(0)，随后调度器进程遍历进程列表，寻找下一个RUNABLE进程，将cpu运行进程mycpu()->切换到该进程，并通过swtch()切换到该进程）。对每个进程而言，他们只是调用swtch()，然后返回，并不了解进程调度的过程。
-    ==usertrap() -> yield() -> sched() -> A.swtch() -> return Scheduler.swtch() -> B.swtch()== 
+    usertrap() -> yield() -> sched() -> A.swtch() -> return Scheduler.swtch() -> B.swtch()
     注意这里进程A的p->context存储的是它自身的上下文，每个CPU都有一个long-running的调度器进程，Scheduler()进程的context就存储在CPU中。
 14. 中断机制：使用的是trapframe、中断可能在任意时刻发生，可能在函数执行中途，恢复的时候需要靠pc寄存器定位，并且几乎需要保存所有的寄存器，才能正确的恢复执行。
     中断通常是由硬件设备发起的，例如IO设备的数据传输请求，会向处理器发送中断信号，处理器调用中断处理程序响应中断。
@@ -490,12 +491,12 @@ barrier()
 ### 相关知识
 1. 锁竞争优化的思路：只在必须共享的时候共享（拆分共享资源）、必须共享时，尽量减少在关键区中的停留时间、降低锁的粒度。
 2. xv6的文件系统有boot sector, super block(存放文件元数据：log长度，inode数量，data block数量), log(允许通过事务更新多个磁盘块，确保数据一致性), inode, bitmap->datablock。
-3. Buffer cache layer的作用：同步访问磁盘块，确保磁盘块在内存中只有一个数据副本，减少磁盘I/O次数。缓存区的大小是固定的，采用LRU机制，用设备号和扇区号来定位data block。==Buffer缓存的接口包括bread, bwrite，read返回一个可读写的内存副本，bwrite将副本写入磁盘，内核线程使用完buffer后必须brelse释放它。他们都会调用bget()先得到一个带锁的block, 首先锁定整个buffer遍历检查data block，如果不存在，第二次循环生成对应的buffer block。==
+3. Buffer cache layer的作用：同步访问磁盘块，确保磁盘块在内存中只有一个数据副本，减少磁盘I/O次数。缓存区的大小是固定的，采用LRU机制，用设备号和扇区号来定位data block。Buffer缓存的接口包括bread, bwrite，read返回一个可读写的内存副本，bwrite将副本写入磁盘，内核线程使用完buffer后必须brelse释放它。他们都会调用bget()先得到一个带锁的block, 首先锁定整个buffer遍历检查data block，如果不存在，第二次循环生成对应的buffer block。
 4. xv6的日志系统效率低下，采用与早期unix相同的inodes和目录的基本磁盘布局。并且目录是很低效的，每次查找过程都要对所有磁盘块进行线性扫描。
    对磁盘故障的处理很朴素，直接抛出panic，普通磁盘应该优雅的处理，使文件中一个块的丢失不影响其他部分的使用。
    文件系统大小不可变，且固定在单一磁盘设备上。采用RAID可以提高外部存储的可用性和稳定性。
 ### 目标
-1. ==拆分kmem中的空闲内存链表，降低kalloc()实现中的kmem锁竞争。==
+1. 拆分kmem中的空闲内存链表，降低kalloc()实现中的kmem锁竞争。
 2. xv6原本的实现中，空闲页记录是采用链表的形式，将空闲物理页本身作为链表项，每次kalloc()和free()时都需要从链表头获取物理页，由于修改是多步操作，为了保持数据的一致性需要加锁，这就导致了无法并发申请内存，限制并发效率。通过对比几个互斥锁的获取和释放频率可以发现kmem锁竞争频繁（还有proc，bcache）
 3.  Buffer cache：多个进程同时使用文件系统时，保护磁盘区块缓存的bcache.lock会出现锁竞争，由于该锁存在，多个进程不能同时申请或释放磁盘缓存。目标是建立一个hash表并实现桶级锁以减少锁竞争，BUCKETS=13，根据block no和device来计算key，并把cache block置于对应key的BUCKET中，每个BUCKET是一个链表，这样仅当两个进程同时访问的区块处于同一个锁时才会发生锁竞争。
 4. xv6原本的实现中：使用双向链表存储所有的区块缓存，每次bwrite或bread调用bget寻找指定blockno和deviceno的block时都会遍历链表，并持有链表的锁，不允许并发访问。如果不存在，会根据LRU算法选取引用计数为0的buf块作为区块缓存返回。
@@ -606,7 +607,7 @@ struct {
 1. 实现Linux系统调用mmap()的简单版：支持将设备映射到虚拟内存中，并将修改的部分写回磁盘。
 ## 实现
 1. 用户的地址空间中，未映射的区域是顶部trapframe以下，heap以上的区域。 由于堆是向上生长的，尽量映射到高地址避免内存映射冲突。如果mmap有多个文件，向下增长。
-2. 实现vma结构体，包括mmap映射内存区域的有关信息：开始地址、==文件大小、所映射文件、权限==等，在进程控制块中添加vma数组。
+2. 实现vma结构体，包括mmap映射内存区域的有关信息：开始地址、文件大小、所映射文件、权限等，在进程控制块中添加vma数组。
 ```C
 //Keep track of what mmap has mapped for each process.
 struct vma {
